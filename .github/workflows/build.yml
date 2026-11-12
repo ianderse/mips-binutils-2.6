@@ -2,86 +2,91 @@ name: Build
 
 on: [push, pull_request]
 
+permissions:
+  contents: write  # publishing a tag's release
+
 jobs:
-  build:
-    runs-on: ${{ matrix.TARGET.OS }}
-    strategy:
-      fail-fast: false
-      matrix:
-        TARGET:
-          - {
-              OS: 'ubuntu-latest',
-              CFLAGS: '-static -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0',
-              HOST: 'i386-pc-linux',
-              ARCHIVE_NAME: 'binutils-2.6-linux.tar.gz'
-            }
-          - {
-              OS: 'macos-latest',
-              CFLAGS: '-DDARWIN -Wno-return-type -Wno-error -Wno-implicit-function-declaration -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0',
-              HOST: 'i386-apple-darwin',
-              ARCHIVE_NAME: 'binutils-2.6-mac.tar.gz'
-            }
-
-    name: Building binutils for ${{ matrix.TARGET.OS }}
+  linux:
+    runs-on: ubuntu-latest
+    name: Building binutils for Linux
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Install dependencies (Ubuntu)
-        shell: bash
-        if: matrix.TARGET.OS == 'ubuntu-latest'
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bison file gperf
 
       - name: Configure for mips
-        shell: bash
         run: |
-          ./configure --target=mips-kmc-elf --prefix=/opt/cross --disable-gprof --disable-gdb --disable-werror --host=${{ matrix.TARGET.HOST }} --build=${{ matrix.TARGET.HOST }}
+          ./configure --target=mips-kmc-elf --prefix=/opt/cross --disable-gprof --disable-gdb --disable-werror --host=i386-pc-linux --build=i386-pc-linux
 
       - name: Make
-        shell: bash
+        env:
+          CFLAGS: -static -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
         run: |
-          make -C bfd CFLAGS="${{ matrix.TARGET.CFLAGS }}"
-          make -C opcodes CFLAGS="${{ matrix.TARGET.CFLAGS }}"
-          make -C libiberty CFLAGS="${{ matrix.TARGET.CFLAGS }}"
-          make -C gas CFLAGS="${{ matrix.TARGET.CFLAGS }}"
-          make -C binutils CFLAGS="${{ matrix.TARGET.CFLAGS }}"
+          make -C bfd CFLAGS="$CFLAGS"
+          make -C opcodes CFLAGS="$CFLAGS"
+          make -C libiberty CFLAGS="$CFLAGS"
+          make -C gas CFLAGS="$CFLAGS"
+          make -C binutils CFLAGS="$CFLAGS"
 
       - name: Test for file
-        shell: bash
         run: |
           test -f binutils/ar
           file binutils/ar
 
       - name: Create release archive
-        shell: bash
         run: |
           cp binutils/ar ar
           cp gas/as.new as
           cp binutils/strip.new strip
           cp binutils/objcopy objcopy
           cp binutils/c++filt c++filt
-          strip ar
-          strip as
-          strip strip
-          strip objcopy
-          strip c++filt
-          chmod +x ar
-          chmod +x as
-          chmod +x strip
-          chmod +x objcopy
-          chmod +x c++filt
-          tar -czf ${{ matrix.TARGET.ARCHIVE_NAME }} ar as strip objcopy c++filt
+          strip ar as strip objcopy c++filt
+          chmod +x ar as strip objcopy c++filt
+          tar -czf binutils-2.6-linux.tar.gz ar as strip objcopy c++filt
 
-      - name: Upload archive
-        uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         with:
-          name: binutils-2.6-${{ matrix.TARGET.OS }}
-          path: |
-            ${{ matrix.TARGET.ARCHIVE_NAME }}
+          name: binutils-2.6-linux
+          path: binutils-2.6-linux.tar.gz
 
       - name: Publish release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: ${{ matrix.TARGET.ARCHIVE_NAME }}
+          files: binutils-2.6-linux.tar.gz
+
+  macos:
+    # Universal binaries (arm64 + x86_64), see macos/build.sh. The archive keeps its old name, so what downloaded the
+    # Intel-only build gets these.
+    runs-on: macos-latest
+    name: Building binutils for macOS (universal)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: sh macos/build.sh dist
+
+      - name: Check both architectures are there and run
+        run: |
+          for p in ar as strip objcopy c++filt; do
+            lipo dist/$p -verify_arch arm64 x86_64
+          done
+          printf 'nop\n' > t.s
+          dist/as -EL -o t.o t.s && file t.o
+
+      - name: Create release archive
+        run: tar -czf binutils-2.6-mac.tar.gz -C dist ar as strip objcopy c++filt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binutils-2.6-mac
+          path: binutils-2.6-mac.tar.gz
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: binutils-2.6-mac.tar.gz

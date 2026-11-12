@@ -49,3 +49,6 @@ gas/targ-cpu.h
 gas/targ-env.h
 libiberty/alloca-conf.h
 
+
+# macos/build.sh output
+dist/
