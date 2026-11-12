@@ -19,6 +19,8 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${1:-"$ROOT/dist"}
+mkdir -p "$OUT"
+OUT=$(cd "$OUT" && pwd)  # (the build cds into each tree: a relative OUT would land there)
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 CFLAGS_COMMON="-DDARWIN -Wno-return-type -Wno-error -Wno-implicit-function-declaration -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"

@@ -23,7 +23,9 @@ jobs:
 
       - name: Make
         env:
-          CFLAGS: -static -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
+          # -std=gnu89: the C these sources are written in. Current GCC defaults to C23, where bfd.h's own `false`
+          # and `true` are keywords, and treats implicit declarations as errors
+          CFLAGS: -std=gnu89 -static -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
         run: |
           make -C bfd CFLAGS="$CFLAGS"
           make -C opcodes CFLAGS="$CFLAGS"
@@ -35,6 +37,9 @@ jobs:
         run: |
           test -f binutils/ar
           file binutils/ar
+
+      - name: Same output as the v0.3 release
+        run: sh ci/compare-with-release.sh gas/as.new https://github.com/decompals/mips-binutils-2.6/releases/download/v0.3/binutils-2.6-linux.tar.gz
 
       - name: Create release archive
         run: |
@@ -76,6 +81,16 @@ jobs:
           done
           printf 'nop\n' > t.s
           dist/as -EL -o t.o t.s && file t.o
+          arch -x86_64 dist/as -EL -o t.o t.s && file t.o
+
+      - name: Same output as the v0.3 release (its Intel build, under Rosetta), both architectures
+        run: |
+          printf '#!/bin/sh\nexec arch -arm64 %s/dist/as "$@"\n' "$PWD" > as-arm64
+          printf '#!/bin/sh\nexec arch -x86_64 %s/dist/as "$@"\n' "$PWD" > as-x86_64
+          chmod +x as-arm64 as-x86_64
+          for a in as-arm64 as-x86_64; do
+            sh ci/compare-with-release.sh "$PWD/$a" https://github.com/decompals/mips-binutils-2.6/releases/download/v0.3/binutils-2.6-mac.tar.gz
+          done
 
       - name: Create release archive
         run: tar -czf binutils-2.6-mac.tar.gz -C dist ar as strip objcopy c++filt
